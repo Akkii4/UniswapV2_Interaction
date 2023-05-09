@@ -1,102 +1,173 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("UniswapInteraction", () => {
+describe("UniswapInteraction", function () {
   let uniswapInteraction;
-  beforeEach(async () => {
+  let owner;
+  let tokenA;
+  let tokenB;
+  let uniswapRouter;
+
+  beforeEach(async function () {
+    [owner] = await ethers.getSigners();
     const UniswapInteraction = await ethers.getContractFactory(
       "UniswapInteraction"
     );
     uniswapInteraction = await UniswapInteraction.deploy();
     await uniswapInteraction.deployed();
+
+    const ERC20Mock = await ethers.getContractFactory("ERC20Mock");
+    tokenA = await ERC20Mock.deploy("Token A", "TKA", 18);
+    await tokenA.deployed();
+
+    tokenB = await ERC20Mock.deploy("Token B", "TKB", 18);
+    await tokenB.deployed();
+
+    const UniswapV2RouterMock = await ethers.getContractFactory(
+      "UniswapV2RouterMock"
+    );
+    uniswapRouter = await UniswapV2RouterMock.deploy(
+      uniswapInteraction.address
+    );
+    await uniswapRouter.deployed();
+
+    await tokenA.mint(owner.address, ethers.utils.parseEther("100"));
+    await tokenB.mint(owner.address, ethers.utils.parseEther("100"));
+    await tokenA.approve(uniswapRouter.address, ethers.utils.parseEther("100"));
+    await tokenB.approve(uniswapRouter.address, ethers.utils.parseEther("100"));
   });
 
-  describe("performSwap", () => {
-    it("should swap tokens successfully", async () => {
-      const tokenFrom = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
-      const tokenTo = "0xc944E90C64B2c07662A292be6244BDf05Cda44a7";
-      const amountFrom = ethers.utils.parseEther("1000");
-      const minAmountTo = ethers.utils.parseEther("1");
-      const recipient = "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2";
-
+  describe("performSwap", function () {
+    it("should swap Token A for Token B", async function () {
       await uniswapInteraction.performSwap(
-        tokenFrom,
-        tokenTo,
-        amountFrom,
-        minAmountTo,
-        recipient
+        tokenA.address,
+        tokenB.address,
+        ethers.utils.parseEther("1"),
+        ethers.utils.parseEther("0.9"),
+        owner.address
       );
-      const recipientBalance = await ethers.provider.getBalance(recipient);
-      expect(recipientBalance).to.be.gt(0);
+
+      const ownerBalanceA = await tokenA.balanceOf(owner.address);
+      expect(ownerBalanceA).to.equal(ethers.utils.parseEther("99"));
+
+      const ownerBalanceB = await tokenB.balanceOf(owner.address);
+      expect(ownerBalanceB).to.be.closeTo(
+        ethers.utils.parseEther("100.1"),
+        ethers.utils.parseEther("0.0001")
+      );
+    });
+
+    it("should swap Token B for Token A", async function () {
+      await uniswapInteraction.performSwap(
+        tokenB.address,
+        tokenA.address,
+        ethers.utils.parseEther("1"),
+        ethers.utils.parseEther("0.9"),
+        owner.address
+      );
+
+      const ownerBalanceB = await tokenB.balanceOf(owner.address);
+      expect(ownerBalanceB).to.equal(ethers.utils.parseEther("99"));
+
+      const ownerBalanceA = await tokenA.balanceOf(owner.address);
+      expect(ownerBalanceA).to.be.closeTo(
+        ethers.utils.parseEther("100.1"),
+        ethers.utils.parseEther("0.0001")
+      );
     });
   });
 
-  describe("getMinOutputAmount", () => {
-    it("should return the minimum output amount", async () => {
-      const tokenFrom = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
-      const tokenTo = "0xc944E90C64B2c07662A292be6244BDf05Cda44a7";
-      const amountFrom = ethers.utils.parseEther("1000");
-
-      const minAmountTo = await uniswapInteraction.getMinOutputAmount(
-        tokenFrom,
-        tokenTo,
-        amountFrom
+  describe("getMinOutputAmount", function () {
+    it("should return the minimum amount of Token B to receive for 1 Token A", async function () {
+      const minAmount = await uniswapInteraction.getMinOutputAmount(
+        tokenA.address,
+        tokenB.address,
+        ethers.utils.parseEther("1")
       );
-      expect(minAmountTo).to.be.gt(0);
+
+      expect(minAmount).to.be.closeTo(
+        ethers.utils.parseEther("0.5"),
+        ethers.utils.parseEther("0.0001")
+      );
     });
   });
-  describe("addLiquidity", () => {
-    it("should add liquidity successfully", async () => {
-      const tokenA = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
-      const tokenB = "0xc944E90C64B2c07662A292be6244BDf05Cda44a7";
-      const amountA = ethers.utils.parseEther("1000");
-      const amountB = ethers.utils.parseEther("2000");
-      const deadline = Math.floor(Date.now() / 1000) + 3600;
 
-      // Approve the tokens for the UniswapInteraction contract
-      const tokenAContract = await ethers.getContractAt("IERC20", tokenA);
-      const tokenBContract = await ethers.getContractAt("IERC20", tokenB);
-      await tokenAContract.approve(uniswapInteraction.address, amountA);
-      await tokenBContract.approve(uniswapInteraction.address, amountB);
-
+  describe("addLiquidity", function () {
+    it("should add liquidity to the Uniswap pool", async function () {
       await uniswapInteraction.addLiquidity(
-        tokenA,
-        tokenB,
-        amountA,
-        amountB,
-        deadline
+        tokenA.address,
+        tokenB.address,
+        ethers.utils.parseEther("10"),
+        ethers.utils.parseEther("10")
       );
-      const lpBalance = await uniswapInteraction.balanceOf(recipient);
-      expect(lpBalance).to.be.gt(0);
+
+      const pair = await uniswapInteraction.retrievePair(
+        tokenA.address,
+        tokenB.address
+      );
+      const reserves = await uniswapRouter.getReserves(pair);
+      expect(reserves[0]).to.equal(ethers.utils.parseEther("10"));
+      expect(reserves[1]).to.equal(ethers.utils.parseEther("10"));
     });
   });
 
-  describe("removeLiquidity", () => {
-    it("should remove liquidity successfully", async () => {
-      const lpToken = "0x34e89740adF97C3A9D3f63Cc2cE4a914382c230b";
-      const lpAmount = ethers.utils.parseUnits("10", 18);
-      const tokenA = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
-      const tokenB = "0xc944E90C64B2c07662A292be6244BDf05Cda44a7";
-      const minAmountA = ethers.utils.parseEther("500");
-      const minAmountB = ethers.utils.parseEther("1000");
-      const deadline = Math.floor(Date.now() / 1000) + 3600;
-
-      await uniswapInteraction.approve(lpToken, lpAmount);
-
-      await uniswapInteraction.removeLiquidity(
-        lpToken,
-        lpAmount,
-        tokenA,
-        tokenB,
-        minAmountA,
-        minAmountB,
-        recipient,
-        deadline
+  describe("removeLiquidity", function () {
+    it("should remove liquidity from the Uniswap pool", async function () {
+      await uniswapInteraction.addLiquidity(
+        tokenA.address,
+        tokenB.address,
+        ethers.utils.parseEther("10"),
+        ethers.utils.parseEther("10")
       );
-      const balanceA = await ethers.provider.getBalance(tokenA);
-      const balanceB = await ethers.provider.getBalance(tokenB);
-      expect(balanceA).to.be.gt(0);
-      expect(balanceB).to.be.gt(0);
+      await uniswapInteraction.removeLiquidity(tokenA.address, tokenB.address);
+
+      const pair = await uniswapInteraction.retrievePair(
+        tokenA.address,
+        tokenB.address
+      );
+      const reserves = await uniswapRouter.getReserves(pair);
+      expect(reserves[0]).to.equal(ethers.utils.parseEther("0"));
+      expect(reserves[1]).to.equal(ethers.utils.parseEther("0"));
+    });
+  });
+
+  describe("addOptimalLiquidity", function () {
+    it("should add optimal liquidity to the Uniswap WETH pool", async function () {
+      await uniswapInteraction.addOptimalLiquidity(
+        tokenA.address,
+        ethers.utils.parseEther("10"),
+        uniswapRouter.WETH()
+      );
+
+      const pair = await uniswapInteraction.retrievePair(
+        tokenA.address,
+        uniswapRouter.WETH()
+      );
+      const reserves = await uniswapRouter.getReserves(pair);
+      expect(reserves[0]).to.be.closeTo(
+        ethers.utils.parseEther("10"),
+        ethers.utils.parseEther("0.01")
+      );
+    });
+  });
+
+  describe("addSubOptimalLiquidity", function () {
+    it("should add suboptimal liquidity to the Uniswap WETH pool", async function () {
+      await uniswapInteraction.addSubOptimalLiquidity(
+        tokenA.address,
+        ethers.utils.parseEther("10"),
+        uniswapRouter.WETH()
+      );
+
+      const pair = await uniswapInteraction.retrievePair(
+        tokenA.address,
+        uniswapRouter.WETH()
+      );
+      const reserves = await uniswapRouter.getReserves(pair);
+      expect(reserves[0]).to.be.closeTo(
+        ethers.utils.parseEther("5"),
+        ethers.utils.parseEther("0.5")
+      );
     });
   });
 });
