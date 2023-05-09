@@ -5,22 +5,27 @@ pragma solidity ^0.8.10;
  * @title ERC20 interface
  * @dev See https://eips.ethereum.org/EIPS/eip-20
  */
-interface IERC20 {
-    function transferFrom(
-        address sender,
-        address recipient,
-        uint256 amount
-    ) external returns (bool);
-
-    function approve(address spender, uint256 amount) external returns (bool);
-}
-
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./interface/IUniswapV2.sol";
 
 contract UniswapInteraction {
     address private constant UNISWAP_ROUTER =
         0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
     address private constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    address private constant UNISWAP_FACTORY =
+        0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f;
+
+    event AddedLiquidity(
+        string message,
+        uint amountTokenA,
+        uint amountTokenB,
+        uint liquidity
+    );
+    event RemovedLiquidity(
+        string message,
+        uint amountTokenA,
+        uint amountTokenB
+    );
 
     /**
      * @dev Swaps an amount of tokens for another using the Uniswap V2 router.
@@ -89,5 +94,82 @@ contract UniswapInteraction {
             .getAmountsOut(amountFrom, path);
 
         return outputAmounts[path.length - 1];
+    }
+
+    /**
+     * @dev Adds liquidity to the Uniswap v2 exchange.
+     * @param tokenA The address of token A.
+     * @param tokenB The address of token B.
+     * @param amountA The amount of token A to add to the liquidity pool.
+     * @param amountB The amount of token B to add to the liquidity pool.
+     */
+    function addLiquidity(
+        address tokenA,
+        address tokenB,
+        uint amountA,
+        uint amountB
+    ) external {
+        // Transfer tokens to the contract address
+        IERC20(tokenA).transferFrom(msg.sender, address(this), amountA);
+        IERC20(tokenB).transferFrom(msg.sender, address(this), amountB);
+        // Approve the Uniswap router to spend the tokens
+        IERC20(tokenA).approve(UNISWAP_ROUTER, amountA);
+        IERC20(tokenB).approve(UNISWAP_ROUTER, amountB);
+        // Add liquidity to the Uniswap exchange
+        (
+            uint amountTokenA,
+            uint amountTokenB,
+            uint liquidity
+        ) = IUniswapV2Router(UNISWAP_ROUTER).addLiquidity(
+                tokenA,
+                tokenB,
+                amountA,
+                amountB,
+                1,
+                1,
+                address(this),
+                block.timestamp
+            );
+        // Emit an event indicating the success of the operation
+        emit AddedLiquidity(
+            "liquidity added successfully",
+            amountTokenA,
+            amountTokenB,
+            liquidity
+        );
+    }
+
+    /**
+     * @dev Removes liquidity from the Uniswap v2 exchange.
+     * @param tokenA The address of token A.
+     * @param tokenB The address of token B.
+     */
+    function removeLiquidity(address tokenA, address tokenB) external {
+        // Get the pair address for the tokens
+        address pair = IUniswapV2Factory(UNISWAP_FACTORY).getPair(
+            tokenA,
+            tokenB
+        );
+        // Approve the Uniswap router to spend the liquidity tokens
+        uint liquidity = IERC20(pair).balanceOf(address(this));
+        IERC20(pair).approve(UNISWAP_ROUTER, liquidity);
+        // Remove liquidity from the Uniswap exchange
+        (uint amountTokenA, uint amountTokenB) = IUniswapV2Router(
+            UNISWAP_ROUTER
+        ).removeLiquidity(
+                tokenA,
+                tokenB,
+                liquidity,
+                1,
+                1,
+                address(this),
+                block.timestamp
+            );
+        // Emit an event indicating the success of the operation
+        emit RemovedLiquidity(
+            "liquidity removed successfully",
+            amountTokenA,
+            amountTokenB
+        );
     }
 }
