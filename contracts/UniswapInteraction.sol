@@ -6,9 +6,12 @@ pragma solidity ^0.8.10;
  * @dev See https://eips.ethereum.org/EIPS/eip-20
  */
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "./interface/IUniswapV2.sol";
 
 contract UniswapInteraction {
+    using SafeMath for uint;
+
     address private constant UNISWAP_ROUTER =
         0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
     address private constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
@@ -171,5 +174,156 @@ contract UniswapInteraction {
             amountTokenA,
             amountTokenB
         );
+    }
+
+    /**
+     * @dev Calculates the square root of a given number.
+     * @param y The number to calculate the square root of.
+     * @return z The square root of y.
+     */
+    function _calculateSqrt(uint y) internal pure returns (uint z) {
+        if (y > 3) {
+            z = y;
+            uint x = y / 2 + 1;
+            while (x < z) {
+                z = x;
+                x = (y / x + x) / 2;
+            }
+        } else if (y != 0) {
+            z = 1;
+        }
+    }
+
+    /**
+     * @dev Calculates the optimal swap amount of Token A for Token B based on the current reserves of the Uniswap pool.
+     * @param r The reserve of Token B in the Uniswap pool.
+     * @param a The amount of Token A to swap.
+     * @return The optimal swap amount of Token A for Token B.
+     */
+    function calculateOptimalSwapAmount(
+        uint r,
+        uint a
+    ) public pure returns (uint) {
+        return
+            (
+                _calculateSqrt(r.mul(r.mul(3988009) + a.mul(3988000))).sub(
+                    r.mul(1997)
+                )
+            ) / 1994;
+    }
+
+    /**
+     * @dev Adds liquidity to a Uniswap pool in an optimal way.
+     * @param _tokenA The address of Token A.
+     * @param _amountA The amount of Token A to add to the Uniswap pool.
+     * @param _tokenB The address of Token B.
+     */
+    function addOptimalLiquidity(
+        address _tokenA,
+        uint _amountA,
+        address _tokenB
+    ) external {
+        require(
+            _tokenA == WETH || _tokenB == WETH,
+            "Token A or B must be WETH"
+        );
+
+        IERC20(_tokenA).transferFrom(msg.sender, address(this), _amountA);
+
+        address pair = IUniswapV2Factory(UNISWAP_FACTORY).getPair(
+            _tokenA,
+            _tokenB
+        );
+        (uint reserve0, uint reserve1, ) = IUniswapV2Pair(pair).getReserves();
+
+        uint swapAmount;
+        if (IUniswapV2Pair(pair).token0() == _tokenA) {
+            swapAmount = calculateOptimalSwapAmount(reserve0, _amountA);
+        } else {
+            swapAmount = calculateOptimalSwapAmount(reserve1, _amountA);
+        }
+
+        _executeTokenSwap(_tokenA, _tokenB, swapAmount);
+        _provideLiquidity(_tokenA, _tokenB);
+    }
+
+    /**
+     * @dev Adds liquidity to a Uniswap pool in a suboptimal way.
+     * @param _tokenA The address of Token A.
+     * @param _amountA The amount of Token A to add to the Uniswap pool.
+     * @param _tokenB The address of Token B.
+     */
+    function addSubOptimalLiquidity(
+        address _tokenA,
+        uint _amountA,
+        address _tokenB
+    ) external {
+        IERC20(_tokenA).transferFrom(msg.sender, address(this), _amountA);
+
+        uint halfAmountA = _amountA.div(2);
+        _executeTokenSwap(_tokenA, _tokenB, halfAmountA);
+        _provideLiquidity(_tokenA, _tokenB);
+    }
+
+    /**
+     * @dev Executes a token swap on Uniswap.
+     * @param _from The address of the token to swap from.
+     * @param _to The address of the token to swap to.
+     * @param _amount The amount of tokens to swap.
+     */
+    function _executeTokenSwap(
+        address _from,
+        address _to,
+        uint _amount
+    ) internal {
+        IERC20(_from).approve(UNISWAP_ROUTER, _amount);
+
+        address[] memory path = new address[](2);
+        path[0] = _from;
+        path[1] = _to;
+
+        IUniswapV2Router(UNISWAP_ROUTER).swapExactTokensForTokens(
+            _amount,
+            1,
+            path,
+            address(this),
+            block.timestamp
+        );
+    }
+
+    /**
+     * @dev Provides liquidity to a Uniswap pool.
+     * @param _tokenA The address of Token A.
+     * @param _tokenB The address of Token B.
+     */
+    function _provideLiquidity(address _tokenA, address _tokenB) internal {
+        uint balA = IERC20(_tokenA).balanceOf(address(this));
+        uint balB = IERC20(_tokenB).balanceOf(address(this));
+        IERC20(_tokenA).approve(UNISWAP_ROUTER, balA);
+        IERC20(_tokenB).approve(UNISWAP_ROUTER, balB);
+
+        IUniswapV2Router(UNISWAP_ROUTER).addLiquidity(
+            _tokenA,
+            _tokenB,
+            balA,
+            balB,
+            0,
+            0,
+            address(this),
+            block.timestamp
+        );
+    }
+
+    /**
+     * @dev Retrieves the pair address of Token A and Token B in the Uniswap factory.
+     * @param _tokenA The address of Token A.
+     * @param _tokenB The address of Token B.
+     * @return The pair address of Token A and Token B.
+     */
+    function retrievePair(
+        address _tokenA,
+        address _tokenB
+    ) external view returns (address) {
+        return IUniswapV2Factory(UNISWAP_FACTORY).getPair(_tokenA, _tokenB);
     }
 }
