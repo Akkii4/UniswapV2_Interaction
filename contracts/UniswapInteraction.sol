@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.10;
 
+/**
+ * @title ERC20 interface
+ * @dev See https://eips.ethereum.org/EIPS/eip-20
+ */
 interface IERC20 {
     function transferFrom(
         address sender,
@@ -18,6 +22,14 @@ contract UniswapInteraction {
         0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
     address private constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
 
+    /**
+     * @dev Swaps an amount of tokens for another using the Uniswap V2 router.
+     * @param tokenFrom The address of the token to swap from.
+     * @param tokenTo The address of the token to receive.
+     * @param amountFrom The amount of tokens to swap.
+     * @param minAmountTo The minimum amount of tokens to receive.
+     * @param recipient The address to receive the tokens.
+     */
     function performSwap(
         address tokenFrom,
         address tokenTo,
@@ -49,6 +61,13 @@ contract UniswapInteraction {
         );
     }
 
+    /**
+     * @dev Calculates the minimum amount of output tokens that will be received for a given input amount of tokens.
+     * @param tokenFrom The address of the token to swap from.
+     * @param tokenTo The address of the token to receive.
+     * @param amountFrom The amount of tokens to swap.
+     * @return The minimum amount of tokens to receive.
+     */
     function getMinOutputAmount(
         address tokenFrom,
         address tokenTo,
